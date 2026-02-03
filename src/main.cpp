@@ -2,8 +2,11 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netdb.h>
+#include <unistd.h>
+
 
 const int backlog { 5 };
+const int yes {1};
 
 int main() {
 
@@ -27,36 +30,58 @@ int main() {
 	// Create IPv4 socket
 	int sock { socket(PF_INET, SOCK_STREAM, 0) };
 	if (sock == -1) {
-		// TODO: print proper error
-		std::cerr << "Socket creation failed\n";
+		perror("error creating socket");
 		exit(1);
 	}
 
-	//Bind socket TODO: error handling on bind
+	// Allow for socket reuse (for restarting server quickly)
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+		perror("setsockopt");
+		exit(1);
+    }
+
+	//Bind socket
 	err = bind(sock, servinfo->ai_addr, servinfo->ai_addrlen);  
 	if (err == -1) {
-		//TODO: print errno
-		std::cerr << "Error binding socket\n";
+		perror("error binding");
 		exit(1);
 	}
 
 	//Listen for connections 
 	err = listen(sock, backlog); 
 	if (err == -1) {
-		std::cerr << "Error listening\n";
+		perror("error listening");
 		exit(1);
 	}
 
-	//Accept connections
-	socklen_t addr_size {sizeof(their_addr)};
-	int new_sock = accept(sock, (struct sockaddr *)&their_addr, &addr_size);
+	struct sigaction sa {};
 
-	char const *msg = "Hello client!\n";
-	int len = strlen(msg);
+	while (true) {
 
-	int bytes_sent = send(new_sock, msg, len, 0);
+		//Accept connections
+		socklen_t addr_size {sizeof(their_addr)};
+		int new_sock = accept(sock, (struct sockaddr *)&their_addr, &addr_size);
+		if (new_sock == -1) {
+			perror("error accepting");
+		}
 
+		pid_t c_pid = fork();
+		if (c_pid ==-1) {
+			perror("fork");
+			exit(1);
+		}
 
+		if (c_pid == 0) {
+			close(sock);
+			if(send(new_sock, "Hello client!\n", 14, 0) == -1) {
+				perror("error sending");
+			}
+			close(new_sock);
+			exit(0);
+		}
+
+		close(new_sock);
+	}
 
 	return 0;
 }
