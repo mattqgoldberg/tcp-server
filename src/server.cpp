@@ -39,7 +39,7 @@ int main() {
 
 	for(p = servinfo; p != NULL; p = p->ai_next) {
 		// Create IPv4 socket
-		sock = socket(PF_INET, SOCK_STREAM, 0);
+		sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
 		if (sock == -1) {
 			perror("error creating socket");
 			continue;
@@ -52,7 +52,7 @@ int main() {
 		}
 
 		//Bind socket
-		err = bind(sock, servinfo->ai_addr, servinfo->ai_addrlen);  
+		err = bind(sock, p->ai_addr, p->ai_addrlen);  
 		if (err == -1) {
 			perror("error binding");
 			continue;
