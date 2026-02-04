@@ -3,10 +3,17 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <signal.h>
 
 
 const int backlog { 5 };
 const int yes {1};
+
+void sigchld_handler(int s) {
+	int saved_errno = errno;
+	while(waitpid(-1, NULL, WNOHANG) > 0);
+	errno = saved_errno;
+}
 
 int main() {
 
@@ -14,6 +21,7 @@ int main() {
 
 	struct addrinfo hints {};
 	struct addrinfo *servinfo {};
+	struct addrinfo *p {};
 	struct sockaddr_storage their_addr {};
 
 	memset(&hints, 0, sizeof(hints));
@@ -27,23 +35,38 @@ int main() {
 		exit(1);
 	}
 
-	// Create IPv4 socket
-	int sock { socket(PF_INET, SOCK_STREAM, 0) };
-	if (sock == -1) {
-		perror("error creating socket");
-		exit(1);
+	int sock {};
+
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		// Create IPv4 socket
+		sock = socket(PF_INET, SOCK_STREAM, 0);
+		if (sock == -1) {
+			perror("error creating socket");
+			continue;
+		}
+
+		// Allow for socket reuse (for restarting server quickly)
+		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+			perror("setsockopt");
+			exit(1);
+		}
+
+		//Bind socket
+		err = bind(sock, servinfo->ai_addr, servinfo->ai_addrlen);  
+		if (err == -1) {
+			perror("error binding");
+			continue;
+		}
+
+		break;
 	}
 
-	// Allow for socket reuse (for restarting server quickly)
-	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-		perror("setsockopt");
-		exit(1);
-    }
 
-	//Bind socket
-	err = bind(sock, servinfo->ai_addr, servinfo->ai_addrlen);  
-	if (err == -1) {
-		perror("error binding");
+
+	freeaddrinfo(servinfo);
+
+	if (p == NULL) {
+		std::cerr << "Failed to bind socket\n";
 		exit(1);
 	}
 
@@ -54,7 +77,15 @@ int main() {
 		exit(1);
 	}
 
+	//Handle dead fork processes
 	struct sigaction sa {};
+	sa.sa_handler = sigchld_handler;
+	sa.sa_flags = SA_RESTART;
+	if (sigaction(SIGCHLD, &sa, NULL) == -1) {
+		perror("error sigaction");
+		exit(1);
+	}
+
 
 	while (true) {
 
@@ -63,6 +94,7 @@ int main() {
 		int new_sock = accept(sock, (struct sockaddr *)&their_addr, &addr_size);
 		if (new_sock == -1) {
 			perror("error accepting");
+			exit(1);
 		}
 
 		pid_t c_pid = fork();
@@ -77,7 +109,7 @@ int main() {
 				perror("error sending");
 			}
 			close(new_sock);
-			exit(0);
+			_exit(0);
 		}
 
 		close(new_sock);
